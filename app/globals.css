@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design tokens ───────────────────────────────────────── */
+:root {
+  --ink-950:    #08090b;
+  --ink-900:    #0d0f12;
+  --ink-800:    #12151a;
+  --ink-700:    #181c23;
+  --ink-600:    #1e242d;
+  --ink-500:    #252d38;
+  --wire:       #1f2937;
+  --steel:      #3d8ef0;
+  --steel-dim:  rgba(61,142,240,0.12);
+  --steel-b:    rgba(61,142,240,0.22);
+
+  --sig-green:  #22c55e;
+  --sig-yellow: #eab308;
+  --sig-orange: #f97316;
+  --sig-red:    #ef4444;
+}
+
+/* ─── Base ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html  { scroll-behavior: smooth; }
+body  {
+  background: var(--ink-950);
+  color: #c9d1dc;
+  font-family: var(--font-geist), system-ui, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #252d38; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2e3846; }
+
+::selection { background: rgba(61,142,240,.28); }
+
+/* ─── Layout primitives ────────────────────────────────────── */
+.panel {
+  background: var(--ink-800);
+  border: 1px solid var(--wire);
+  border-radius: 8px;
+}
+.panel-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--wire);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ─── Typography ───────────────────────────────────────────── */
+.label-caps {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #4a5568;
+}
+.mono { font-family: var(--font-mono), monospace; }
+
+/* ─── Status & priority pills ──────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  border: 1px solid transparent;
+}
+.pill-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── Inputs ───────────────────────────────────────────────── */
+.field {
+  width: 100%;
+  background: var(--ink-900);
+  border: 1px solid var(--wire);
+  border-radius: 6px;
+  padding: 9px 13px;
+  color: #c9d1dc;
+  font-size: 13.5px;
+  transition: border-color .18s, box-shadow .18s;
+  outline: none;
+}
+.field::placeholder { color: #344050; }
+.field:focus {
+  border-color: var(--steel-b);
+  box-shadow: 0 0 0 3px var(--steel-dim);
+}
+select.field { cursor: pointer; }
+textarea.field { resize: vertical; min-height: 120px; }
+
+/* ─── Buttons ──────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all .15s;
+  white-space: nowrap;
+  line-height: 1;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary  { background: var(--steel); color: #fff; border-color: var(--steel); }
+.btn-primary:hover:not(:disabled) { background: #2f7ae0; }
+.btn-ghost    { background: transparent; color: #7a8fa8; border-color: var(--wire); }
+.btn-ghost:hover:not(:disabled)   { background: var(--ink-700); color: #c9d1dc; }
+.btn-danger   { background: rgba(239,68,68,.1); color: #ef4444; border-color: rgba(239,68,68,.25); }
+.btn-danger:hover:not(:disabled)  { background: rgba(239,68,68,.18); }
+.btn-success  { background: rgba(34,197,94,.1); color: #22c55e; border-color: rgba(34,197,94,.25); }
+.btn-success:hover:not(:disabled) { background: rgba(34,197,94,.18); }
+
+/* ─── Table ─────────────────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #3d4e62;
+  border-bottom: 1px solid var(--wire);
+}
+.data-table td { padding: 12px 14px; border-bottom: 1px solid #12151a; }
+.data-table tbody tr { transition: background .12s; }
+.data-table tbody tr:hover { background: var(--ink-700); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+
+/* ─── Stat card ─────────────────────────────────────────────── */
+.stat-card {
+  background: var(--ink-800);
+  border: 1px solid var(--wire);
+  border-radius: 8px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stat-value {
+  font-family: var(--font-dm), sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ─── Sidebar ───────────────────────────────────────────────── */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #4a5f76;
+  cursor: pointer;
+  transition: all .14s;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.nav-item:hover  { background: var(--ink-700); color: #8fa3be; }
+.nav-item.active { background: var(--steel-dim); color: var(--steel); border-color: var(--steel-b); }
+.nav-item.active .nav-icon { color: var(--steel); }
+.nav-icon { color: #3d4e62; flex-shrink: 0; transition: color .14s; }
+
+/* ─── Animations ─────────────────────────────────────────────── */
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulseDot { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(.85); } }
+
+.anim-fade { animation: fadeIn .32s ease forwards; }
+.anim-up   { animation: slideUp .32s ease forwards; }
+
+/* Stagger helpers */
+.stagger-1 { animation-delay: .05s; opacity: 0; }
+.stagger-2 { animation-delay: .10s; opacity: 0; }
+.stagger-3 { animation-delay: .15s; opacity: 0; }
+.stagger-4 { animation-delay: .20s; opacity: 0; }
+
+/* ─── Misc ──────────────────────────────────────────────────── */
+.divider { height: 1px; background: var(--wire); }
+.focus-ring:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+
+/* Scanline texture overlay for the IT aesthetic */
+.scanline::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  z-index: 9999;
+}
