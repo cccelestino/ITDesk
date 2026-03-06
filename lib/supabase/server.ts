@@ -9,8 +9,12 @@ export function createClient() {
     {
       cookies: {
         getAll() { return jar.getAll() },
-        setAll(list) {
-          try { list.forEach(({ name, value, options }) => jar.set(name, value, options)) } catch {}
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              jar.set(name, value, options)
+            )
+          } catch {}
         },
       },
     }
