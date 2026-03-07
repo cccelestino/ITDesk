@@ -1,180 +1,300 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+'use client'
+import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import {
-  UserCog, AlertOctagon, Building2, ScrollText,
-  ShieldCheck, Users, Ticket, TrendingUp, ArrowRight,
+  AlertOctagon, UserCheck, Loader2, RefreshCw,
+  Zap, Clock, Filter,
 } from 'lucide-react'
-import Link from 'next/link'
+import { PRIORITY_MAP, CATEGORY_MAP } from '@/types'
+import { formatDistanceToNow } from 'date-fns'
+import { es } from 'date-fns/locale'
+import toast from 'react-hot-toast'
 
-export default async function AdminPage() {
+interface Agent { id: string; full_name: string | null; display_name: string | null; open_count: number }
+interface Ticket {
+  id: string; ticket_number: number; title: string
+  priority: string; category: string; created_at: string
+  created_by_profile: { full_name: string | null; email: string } | null
+}
+
+export default function UnassignedPage() {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/auth')
+  const [tickets, setTickets] = useState<Ticket[]>([])
+  const [agents, setAgents]   = useState<Agent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving]   = useState<string | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkAgent, setBulkAgent] = useState('')
+  const [assignMap, setAssignMap] = useState<Record<string, string>>({})
 
-  const { data: me } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (me?.role !== 'admin') redirect('/dashboard')
+  const load = useCallback(async () => {
+    setLoading(true)
+    const [{ data: t }, { data: a }, { data: counts }] = await Promise.all([
+      supabase
+        .from('tickets')
+        .select('id, ticket_number, title, priority, category, created_at, created_by_profile:profiles!tickets_created_by_fkey(full_name,email)')
+        .is('assigned_to', null)
+        .in('status', ['open', 'in_progress', 'pending'])
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('profiles')
+        .select('id, full_name, display_name')
+        .in('role', ['agent', 'admin'])
+        .eq('is_active', true),
+      supabase
+        .from('tickets')
+        .select('assigned_to')
+        .not('assigned_to', 'is', null)
+        .in('status', ['open', 'in_progress', 'pending']),
+    ])
 
-  // Quick stats
-  const [
-    { count: totalUsers },
-    { count: activeAgents },
-    { count: unassigned },
-    { count: openTickets },
-    { data: recentLogs },
-  ] = await Promise.all([
-    supabase.from('profiles').select('id', { count: 'exact', head: true }),
-    supabase.from('profiles').select('id', { count: 'exact', head: true }).in('role', ['agent', 'admin']).eq('is_active', true),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }).is('assigned_to', null).in('status', ['open', 'in_progress', 'pending']),
-    supabase.from('tickets').select('id', { count: 'exact', head: true }).in('status', ['open', 'in_progress']),
-    supabase.from('activity_log').select('action, created_at, actor:profiles(display_name, full_name)').order('created_at', { ascending: false }).limit(5),
-  ])
+    const countMap: Record<string, number> = {}
+    counts?.forEach((c: any) => { countMap[c.assigned_to] = (countMap[c.assigned_to] || 0) + 1 })
 
-  const cards = [
-    {
-      href: '/dashboard/admin/users',
-      icon: UserCog, label: 'Gestión de usuarios',
-      desc: 'Crear, editar roles, activar o desactivar cuentas',
-      stat: String(totalUsers ?? 0), statLabel: 'usuarios totales',
-      color: '#3d8ef0',
-    },
-    {
-      href: '/dashboard/admin/unassigned',
-      icon: AlertOctagon, label: 'Tickets sin asignar',
-      desc: 'Asignar manualmente o usar auto-balanceo por carga',
-      stat: String(unassigned ?? 0), statLabel: 'pendientes',
-      color: unassigned ? '#f97316' : '#22c55e',
-      alert: (unassigned ?? 0) > 0,
-    },
-    {
-      href: '/dashboard/admin/departments',
-      icon: Building2, label: 'Departamentos',
-      desc: 'Configurar áreas y asignar colores de identificación',
-      stat: '', statLabel: '',
-      color: '#8b5cf6',
-    },
-    {
-      href: '/dashboard/admin/logs',
-      icon: ScrollText, label: 'Logs de actividad',
-      desc: 'Auditoría completa de acciones administrativas',
-      stat: '', statLabel: '',
-      color: '#eab308',
-    },
-  ]
+    setTickets((t as any[]) || [])
+    setAgents((a || []).map((ag: any) => ({ ...ag, open_count: countMap[ag.id] || 0 }))
+      .sort((a: Agent, b: Agent) => a.open_count - b.open_count))
+    setLoading(false)
+  }, [])
 
-  const ACTION_LABELS: Record<string, string> = {
-    'user.role_changed': 'cambió un rol',
-    'user.activated': 'activó un usuario',
-    'user.deactivated': 'desactivó un usuario',
-    'ticket.assigned': 'asignó un ticket',
-    'ticket.auto_assigned': 'auto-asignación ejecutada',
+  useEffect(() => { load() }, [load])
+
+  const assignOne = async (ticketId: string, agentId: string) => {
+    if (!agentId) { toast.error('Selecciona un agente'); return }
+    setSaving(ticketId)
+    const { error } = await supabase.from('tickets')
+      .update({ assigned_to: agentId, status: 'in_progress' })
+      .eq('id', ticketId)
+    if (error) { toast.error(error.message); setSaving(null); return }
+    await supabase.from('activity_log').insert({
+      action: 'ticket.assigned',
+      target_type: 'ticket', target_id: ticketId,
+      meta: { agent_id: agentId, source: 'admin_manual' },
+    })
+    toast.success('Ticket asignado')
+    setTickets(p => p.filter(t => t.id !== ticketId))
+    setSaving(null)
   }
 
+  const autoAssign = async () => {
+    if (!agents.length) { toast.error('No hay agentes disponibles'); return }
+    setSaving('auto')
+    let assigned = 0
+    const agentsCopy = [...agents]
+
+    for (const ticket of tickets) {
+      // Assign to agent with least open tickets (round-robin by load)
+      const agent = agentsCopy.sort((a, b) => a.open_count - b.open_count)[0]
+      const { error } = await supabase.from('tickets')
+        .update({ assigned_to: agent.id, status: 'in_progress' })
+        .eq('id', ticket.id)
+      if (!error) {
+        await supabase.from('activity_log').insert({
+          action: 'ticket.auto_assigned',
+          target_type: 'ticket', target_id: ticket.id,
+          meta: { agent_id: agent.id, source: 'auto_balance' },
+        })
+        agent.open_count++
+        assigned++
+      }
+    }
+
+    toast.success(`${assigned} tickets asignados automáticamente`)
+    setSaving(null)
+    load()
+  }
+
+  const bulkAssign = async () => {
+    if (!bulkAgent) { toast.error('Selecciona un agente para asignación masiva'); return }
+    if (!selected.length) { toast.error('Selecciona al menos un ticket'); return }
+    setSaving('bulk')
+    const { error } = await supabase.from('tickets')
+      .update({ assigned_to: bulkAgent, status: 'in_progress' })
+      .in('id', selected)
+    if (error) { toast.error(error.message); setSaving(null); return }
+    toast.success(`${selected.length} tickets asignados`)
+    setSelected([])
+    setSaving(null)
+    load()
+  }
+
+  const toggleSelect = (id: string) =>
+    setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
+  const toggleAll = () =>
+    setSelected(selected.length === tickets.length ? [] : tickets.map(t => t.id))
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6 anim-fade">
+    <div className="max-w-6xl mx-auto space-y-5 anim-fade">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center"
-          style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.2)' }}>
-          <ShieldCheck size={18} style={{ color: '#ef4444' }} />
-        </div>
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display font-bold text-xl text-white">Panel de administración</h1>
+          <h1 className="font-display font-bold text-xl text-white flex items-center gap-2">
+            <AlertOctagon size={20} style={{ color: '#f97316' }} />
+            Tickets sin asignar
+          </h1>
           <p className="text-[12.5px] mt-0.5" style={{ color: '#4a5f76' }}>
-            Control total del sistema ITDesk
+            {tickets.length} ticket{tickets.length !== 1 ? 's' : ''} esperando asignación
           </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={load} className="btn btn-ghost" style={{ padding: '7px 11px' }}>
+            <RefreshCw size={13} />
+          </button>
+          <button onClick={autoAssign} disabled={saving === 'auto' || !tickets.length}
+            className="btn btn-primary" style={{ background: '#f97316', borderColor: '#f97316' }}>
+            {saving === 'auto' ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+            Auto-asignar todo
+          </button>
         </div>
       </div>
 
-      {/* Alert banner if unassigned tickets */}
-      {(unassigned ?? 0) > 0 && (
-        <Link href="/dashboard/admin/unassigned"
-          className="flex items-center gap-3 p-3 rounded-lg anim-up"
-          style={{ background: 'rgba(249,115,22,.08)', border: '1px solid rgba(249,115,22,.25)' }}>
-          <AlertOctagon size={16} style={{ color: '#f97316', flexShrink: 0 }} />
-          <p className="flex-1 text-[13px]" style={{ color: '#f97316' }}>
-            <strong>{unassigned}</strong> ticket{(unassigned ?? 0) !== 1 ? 's' : ''} sin asignar están esperando atención
-          </p>
-          <ArrowRight size={14} style={{ color: '#f97316', flexShrink: 0 }} />
-        </Link>
-      )}
-
-      {/* Quick stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'Usuarios', value: totalUsers ?? 0, icon: Users, color: '#3d8ef0' },
-          { label: 'Agentes activos', value: activeAgents ?? 0, icon: ShieldCheck, color: '#8b5cf6' },
-          { label: 'Sin asignar', value: unassigned ?? 0, icon: AlertOctagon, color: '#f97316' },
-          { label: 'Tickets abiertos', value: openTickets ?? 0, icon: Ticket, color: '#eab308' },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="stat-card">
-            <div className="flex items-center justify-between">
-              <span className="label-caps">{label}</span>
-              <Icon size={13} style={{ color, opacity: .7 }} />
-            </div>
-            <div className="stat-value" style={{ color, fontSize: 26 }}>{String(value)}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Admin modules grid */}
-      <div className="grid md:grid-cols-2 gap-3">
-        {cards.map(({ href, icon: Icon, label, desc, stat, statLabel, color, alert }) => (
-          <Link key={href} href={href}
-            className="panel p-5 flex gap-4 group transition-all"
-            style={{ borderColor: alert ? 'rgba(249,115,22,.3)' : undefined }}
-          >
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: color + '15', border: `1px solid ${color}25` }}>
-              <Icon size={18} style={{ color }} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[14px] font-semibold text-white group-hover:underline">{label}</span>
-                <ArrowRight size={13} style={{ color: '#3d4e62' }} />
-              </div>
-              <p className="text-[12px] leading-relaxed" style={{ color: '#4a5f76' }}>{desc}</p>
-              {stat && (
-                <div className="mt-2">
-                  <span className="mono text-[18px] font-bold" style={{ color }}>{stat}</span>
-                  <span className="text-[11px] ml-1.5" style={{ color: '#3d4e62' }}>{statLabel}</span>
+      {/* Agent load overview */}
+      {agents.length > 0 && (
+        <div className="panel p-4">
+          <div className="label-caps mb-3">Carga actual por agente</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {agents.map(agent => (
+              <div key={agent.id} className="flex items-center gap-2.5 p-2.5 rounded-md"
+                style={{ background: 'var(--ink-700)', border: '1px solid var(--wire)' }}>
+                <div className="w-6 h-6 rounded flex items-center justify-center text-[9px] font-bold shrink-0"
+                  style={{ background: 'var(--steel-dim)', color: 'var(--steel)' }}>
+                  {(agent.display_name || agent.full_name || 'A')[0].toUpperCase()}
                 </div>
-              )}
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* Recent activity */}
-      {recentLogs && recentLogs.length > 0 && (
-        <div className="panel">
-          <div className="panel-header">
-            <span className="text-[13px] font-semibold text-white flex items-center gap-2">
-              <TrendingUp size={13} style={{ color: '#3d4e62' }} />
-              Actividad reciente
-            </span>
-            <Link href="/dashboard/admin/logs"
-              className="text-[11.5px] flex items-center gap-1" style={{ color: 'var(--steel)' }}>
-              Ver todo <ArrowRight size={11} />
-            </Link>
-          </div>
-          <div className="divide-y" style={{ borderColor: '#12151a' }}>
-            {recentLogs.map((log: any) => (
-              <div key={log.id} className="px-4 py-2.5 flex items-center gap-3">
-                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#3d4e62' }} />
-                <span className="text-[12px] flex-1" style={{ color: '#5a6f88' }}>
-                  <strong style={{ color: '#7a8fa8' }}>
-                    {(log.actor as any)?.display_name || (log.actor as any)?.full_name || 'Sistema'}
-                  </strong>
-                  {' '}{ACTION_LABELS[log.action] || log.action}
-                </span>
-                <span className="text-[10.5px]" style={{ color: '#2e3846' }}>
-                  {new Date(log.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-medium text-white truncate">
+                    {agent.display_name || agent.full_name}
+                  </div>
+                </div>
+                <span className="mono text-[11px] shrink-0"
+                  style={{ color: agent.open_count > 5 ? '#f97316' : '#22c55e' }}>
+                  {agent.open_count}
                 </span>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Bulk actions bar */}
+      {selected.length > 0 && (
+        <div className="panel p-3 flex items-center gap-3 anim-up"
+          style={{ borderColor: 'rgba(61,142,240,.3)', background: 'rgba(61,142,240,.05)' }}>
+          <span className="text-[12px]" style={{ color: 'var(--steel)' }}>
+            {selected.length} seleccionado{selected.length !== 1 ? 's' : ''}
+          </span>
+          <select value={bulkAgent} onChange={e => setBulkAgent(e.target.value)}
+            className="field flex-1 max-w-xs" style={{ fontSize: 12 }}>
+            <option value="">— Asignar a agente —</option>
+            {agents.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.display_name || a.full_name} ({a.open_count} activos)
+              </option>
+            ))}
+          </select>
+          <button onClick={bulkAssign} disabled={saving === 'bulk' || !bulkAgent}
+            className="btn btn-primary" style={{ padding: '7px 12px', fontSize: 12 }}>
+            {saving === 'bulk' ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}
+            Asignar seleccionados
+          </button>
+          <button onClick={() => setSelected([])} className="btn btn-ghost" style={{ padding: '7px 11px', fontSize: 12 }}>
+            Cancelar
+          </button>
+        </div>
+      )}
+
+      {/* Tickets table */}
+      <div className="panel overflow-hidden">
+        {loading ? (
+          <div className="p-10 text-center"><Loader2 size={20} className="animate-spin mx-auto" style={{ color: '#3d4e62' }} /></div>
+        ) : !tickets.length ? (
+          <div className="p-12 text-center">
+            <AlertOctagon size={36} style={{ color: '#1f2937', margin: '0 auto 12px' }} />
+            <p className="text-[13px]" style={{ color: '#3d4e62' }}>✓ Todos los tickets están asignados</p>
+          </div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 36 }}>
+                  <input type="checkbox"
+                    checked={selected.length === tickets.length && tickets.length > 0}
+                    onChange={toggleAll}
+                    className="accent-blue-500 cursor-pointer" />
+                </th>
+                <th>#</th>
+                <th>Título</th>
+                <th>Prioridad</th>
+                <th>Categoría</th>
+                <th>Solicitante</th>
+                <th>Espera</th>
+                <th>Asignar a</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tickets.map(ticket => {
+                const pr  = PRIORITY_MAP[ticket.priority as keyof typeof PRIORITY_MAP]
+                const cat = CATEGORY_MAP[ticket.category as keyof typeof CATEGORY_MAP]
+                const isSaving = saving === ticket.id
+                return (
+                  <tr key={ticket.id}>
+                    <td>
+                      <input type="checkbox"
+                        checked={selected.includes(ticket.id)}
+                        onChange={() => toggleSelect(ticket.id)}
+                        className="accent-blue-500 cursor-pointer" />
+                    </td>
+                    <td className="mono text-[11px]" style={{ color: 'var(--steel)' }}>#{ticket.ticket_number}</td>
+                    <td>
+                      <a href={`/dashboard/tickets/${ticket.id}`} target="_blank" rel="noreferrer"
+                        className="text-[13px] font-medium text-white hover:underline"
+                        style={{ display: 'block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ticket.title}
+                      </a>
+                    </td>
+                    <td>
+                      <span className="pill text-[10px]" style={{ background: pr?.bg, color: pr?.color }}>{pr?.label}</span>
+                    </td>
+                    <td className="text-[12px]" style={{ color: '#4a5f76' }}>
+                      {cat?.icon} {cat?.label}
+                    </td>
+                    <td className="text-[12px]" style={{ color: '#7a8fa8' }}>
+                      {ticket.created_by_profile?.full_name || ticket.created_by_profile?.email}
+                    </td>
+                    <td>
+                      <span className="text-[11px] flex items-center gap-1" style={{ color: '#f97316' }}>
+                        <Clock size={10} />
+                        {formatDistanceToNow(new Date(ticket.created_at), { locale: es })}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={assignMap[ticket.id] || ''}
+                          onChange={e => setAssignMap(p => ({ ...p, [ticket.id]: e.target.value }))}
+                          className="field" style={{ fontSize: 11, padding: '4px 7px', minWidth: 130 }}>
+                          <option value="">— Agente —</option>
+                          {agents.map(a => (
+                            <option key={a.id} value={a.id}>
+                              {a.display_name || a.full_name} ({a.open_count})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => assignOne(ticket.id, assignMap[ticket.id])}
+                          disabled={isSaving || !assignMap[ticket.id]}
+                          className="btn btn-primary"
+                          style={{ padding: '4px 9px', fontSize: 11 }}>
+                          {isSaving ? <Loader2 size={11} className="animate-spin" /> : <UserCheck size={11} />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   )
 }
